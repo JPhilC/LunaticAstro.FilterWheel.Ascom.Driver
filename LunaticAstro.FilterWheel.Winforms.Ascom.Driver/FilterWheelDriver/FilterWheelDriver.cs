@@ -11,7 +11,6 @@
 using ASCOM;
 using ASCOM.DeviceInterface;
 using ASCOM.LocalServer;
-using ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver.ViewModel;
 using ASCOM.Utilities;
 using System;
 using System.Collections;
@@ -20,7 +19,7 @@ using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
+namespace ASCOM.LunaticAstroDiyFilterWheel.FilterWheel
 {
     //
     // This code is mostly a presentation layer for the functionality in the FilterWheelHardware class. You should not need to change the contents of this file very much, if at all.
@@ -199,44 +198,23 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
         /// </summary>
         public void SetupDialog()
         {
-            // Prevent multiple dialogs
-            if (System.Windows.Forms.Application.OpenForms.Count > 0)
-                return;
-
-            using (var form = new System.Windows.Forms.Form())
+            try
             {
-                form.Text = "Lunatic Astro DIY FilterWheel Setup";
-                form.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
-                form.MaximizeBox = false;
-                form.MinimizeBox = false;
-                form.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
-                form.Width = 480;
-                form.Height = 260;
-
-                var host = new System.Windows.Forms.Integration.ElementHost
+                if (connectedState) // Don't show if already connected
                 {
-                    Dock = System.Windows.Forms.DockStyle.Fill
-                };
-
-                var control = new Views.SetupDialogControl();
-                host.Child = control;
-
-                form.Controls.Add(host);
-
-                // Hook ViewModel close event
-                if (control.DataContext is SetupViewModel vm)
-                {
-                    vm.CloseRequested += result =>
-                    {
-                        form.DialogResult = result
-                            ? System.Windows.Forms.DialogResult.OK
-                            : System.Windows.Forms.DialogResult.Cancel;
-
-                        form.Close();
-                    };
+                    MessageBox.Show("Already connected, just press OK");
                 }
-
-                form.ShowDialog();
+                else // Show dialogue
+                {
+                    LogMessage("SetupDialog", $"Calling SetupDialog.");
+                    FilterWheelHardware.SetupDialog();
+                    LogMessage("SetupDialog", $"Completed.");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogMessage("SetupDialog", $"Threw an exception: \r\n{ex}");
+                throw;
             }
         }
 

@@ -12,7 +12,6 @@ using ASCOM.Astrometry.AstroUtils;
 using ASCOM.Astrometry.NOVAS;
 using ASCOM.DeviceInterface;
 using ASCOM.LocalServer;
-using ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver.ViewModel;
 using ASCOM.Utilities;
 using System;
 using System.Collections;
@@ -20,9 +19,8 @@ using System.Collections.Generic;
 using System.IO.Ports;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using System.Windows.Forms.Integration;
 
-namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
+namespace ASCOM.LunaticAstroDiyFilterWheel.FilterWheel
 {
     //
     // TODO Customise the InitialiseHardware() method with code to set up a communication path to your hardware and validate that the hardware exists
@@ -120,6 +118,32 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
         // PUBLIC COM INTERFACE IFilterWheelV3 IMPLEMENTATION
 
         #region Common properties and methods.
+
+        /// <summary>
+        /// Displays the Setup Dialogue form.
+        /// If the user clicks the OK button to dismiss the form, then
+        /// the new settings are saved, otherwise the old values are reloaded.
+        /// THIS IS THE ONLY PLACE WHERE SHOWING USER INTERFACE IS ALLOWED!
+        /// </summary>
+        public static void SetupDialog()
+        {
+            // Don't permit the setup dialogue if already connected
+            if (IsConnected)
+            {
+                MessageBox.Show("Already connected, just press OK");
+                return; // Exit the method if already connected
+            }
+
+            using (SetupDialogForm F = new SetupDialogForm(tl))
+            {
+                var result = F.ShowDialog();
+                if (result == DialogResult.OK)
+                {
+                    WriteProfile(); // Persist device configuration values to the ASCOM Profile store
+                }
+            }
+        }
+
         /// <summary>Returns the list of custom action names supported by this driver.</summary>
         /// <value>An ArrayList of strings (SafeArray collection) containing the names of supported actions.</value>
         public static ArrayList SupportedActions

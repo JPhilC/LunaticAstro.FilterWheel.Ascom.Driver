@@ -3,7 +3,8 @@
     <Platform Name="Any CPU" />
     <Platform Name="x86" />
   </Configurations>
-  <Project Path="LunaticAstro.FilterWheel.Ascom.Driver/LunaticAstro.FilterWheel.Ascom.Driver.csproj">
+  <Project Path="LunaticAstro.FilterWheel.Ascom.Driver/LunaticAstro.FilterWheel.Ascom.Driver.csproj" Id="68ce03ed-fc7e-4b09-b9a3-1b0f2e607d5e" />
+  <Project Path="LunaticAstro.FilterWheel.Winforms.Ascom.Driver/LunaticAstro.FilterWheel..Winforms.Ascom.Driver.csproj" Id="8a9d09f7-a823-3c11-e7f6-458a792a6929">
     <Platform Solution="*|x86" Project="x86" />
   </Project>
 </Solution>
