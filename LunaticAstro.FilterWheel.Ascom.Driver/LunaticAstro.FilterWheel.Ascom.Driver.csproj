@@ -15,6 +15,7 @@
 		<AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
 		<Deterministic>true</Deterministic>
 		<StartupObject>ASCOM.LocalServer.Server</StartupObject>
+		<Platforms>AnyCPU;x86</Platforms>
 	</PropertyGroup>
 
 	<PropertyGroup>

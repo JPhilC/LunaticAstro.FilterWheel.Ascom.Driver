@@ -34,7 +34,7 @@
                Height="56"
                Cursor="Hand"
                Margin="0,0,0,10"
-               Source="/ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver;component/Resources/ascom_logo.png"
+               Source="pack://application:,,,/ASCOM.LunaticAstro.Diy.FilterWheel;component/Resources/ASCOM.png"
                MouseLeftButtonUp="BrowseToAscom"/>
 
         <!-- COM Port -->

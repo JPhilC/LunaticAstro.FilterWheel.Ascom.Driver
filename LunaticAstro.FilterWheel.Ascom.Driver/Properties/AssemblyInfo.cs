@@ -7,11 +7,11 @@ using System.Runtime.InteropServices;
 // associated with an assembly.
 //
 // TODO - Add your authorship information here
-[assembly: AssemblyTitle("ASCOM.LunaticAstro.DiyFilterWheel")]
-[assembly: AssemblyDescription("ASCOM Local Server FilterWheel driver for Lunatic Astro Diy FilterWheel")]
+[assembly: AssemblyTitle("Lunatic Astro Nano Filter Wheel")]
+[assembly: AssemblyDescription("ASCOM Driver for Lunatic Astro Nano Filter Wheels")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("The ASCOM Initiative")]
-[assembly: AssemblyProduct("ASCOM Local Server FilterWheel driver for Lunatic Astro Diy FilterWheel")]
+[assembly: AssemblyProduct("ASCOM Local Server FilterWheel driver for Lunatic Astro Nano FilterWheel")]
 [assembly: AssemblyCopyright("Copyright © 2026 Lunatic Astro")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]

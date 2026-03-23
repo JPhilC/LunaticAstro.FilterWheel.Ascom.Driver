@@ -40,21 +40,22 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
     internal static class FilterWheelHardware
     {
         // Constants used for Profile persistence
-        internal const string comPortProfileName = "COM Port";
-        internal const string comPortDefault = "COM1";
-        internal const string traceStateProfileName = "Trace Level";
-        internal const string traceStateDefault = "true";
+        internal const string ComPortProfileName = "COM Port";
+        internal const string ComPortDefault = "COM1";
+        internal const string TraceStateProfileName = "Trace Level";
+        internal const string TraceStateDefault = "true";
 
         private static string DriverProgId = ""; // ASCOM DeviceID (COM ProgID) for this driver, the value is set by the driver's class initialiser.
         private static string DriverDescription = ""; // The value is set by the driver's class initialiser.
-        internal static string comPort; // COM port name (if required)
-        private static bool connectedState; // Local server's connected state
-        private static bool runOnce = false; // Flag to enable "one-off" activities only to run once.
-        internal static Util utilities; // ASCOM Utilities object for use as required
-        internal static AstroUtils astroUtilities; // ASCOM AstroUtilities object for use as required
-        internal static TraceLogger tl; // Local server's trace logger object for diagnostic log with information that you specify
+        internal static string ComPort {get; set;} // COM port name (if required)
 
-        private static List<Guid> uniqueIds = new List<Guid>(); // List of driver instance unique IDs
+        private static bool _connectedState; // Local server's connected state
+        private static bool _runOnce = false; // Flag to enable "one-off" activities only to run once.
+        internal static Util Utilities; // ASCOM Utilities object for use as required
+        internal static AstroUtils AstroUtilities; // ASCOM AstroUtilities object for use as required
+        internal static TraceLogger Tl; // Local server's trace logger object for diagnostic log with information that you specify
+
+        private static List<Guid> _uniqueIds = new List<Guid>(); // List of driver instance unique IDs
 
         /// <summary>
         /// Initializes a new instance of the device Hardware class.
@@ -63,9 +64,12 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
         {
             try
             {
+                if (IsInDesignMode)
+                    return;
+
                 // Create the hardware trace logger in the static initialiser.
                 // All other initialisation should go in the InitialiseHardware method.
-                tl = new TraceLogger("", "LunaticAstroDiyFilterWheel.Hardware");
+                Tl = new TraceLogger("", "LunaticAstroDiyFilterWheel.Hardware");
 
                 // DriverProgId has to be set here because it used by ReadProfile to get the TraceState flag.
                 DriverProgId = FilterWheel.DriverProgId; // Get this device's ProgID so that it can be used to read the Profile configuration values
@@ -77,8 +81,14 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
             }
             catch (Exception ex)
             {
-                try { LogMessage("FilterWheelHardware", $"Initialisation exception: {ex}"); } catch { }
-                MessageBox.Show($"FilterWheelHardware - {ex.Message}\r\n{ex}", $"Exception creating {FilterWheel.DriverProgId}", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(
+            $"FilterWheelHardware static ctor failed:\r\n{ex}",
+            "Driver Startup Error",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Error);
+
+                //try { LogMessage("FilterWheelHardware", $"Initialisation exception: {ex}"); } catch { }
+                //MessageBox.Show($"FilterWheelHardware - {ex.Message}\r\n{ex}", $"Exception creating {FilterWheel.DriverProgId}", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 throw;
             }
         }
@@ -95,7 +105,7 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
             // Add any code that you want to run every time a client connects to your driver here
 
             // Add any code that you only want to run when the first client connects in the if (runOnce == false) block below
-            if (runOnce == false)
+            if (_runOnce == false)
             {
                 LogMessage("InitialiseHardware", $"Starting one-off initialisation.");
 
@@ -103,9 +113,9 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
 
                 LogMessage("InitialiseHardware", $"ProgID: {DriverProgId}, Description: {DriverDescription}");
 
-                connectedState = false; // Initialise connected to false
-                utilities = new Util(); //Initialise ASCOM Utilities object
-                astroUtilities = new AstroUtils(); // Initialise ASCOM Astronomy Utilities object
+                _connectedState = false; // Initialise connected to false
+                Utilities = new Util(); //Initialise ASCOM Utilities object
+                AstroUtilities = new AstroUtils(); // Initialise ASCOM Astronomy Utilities object
 
                 LogMessage("InitialiseHardware", "Completed basic initialisation");
 
@@ -113,9 +123,13 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
                 // If you are using a serial COM port you will find the COM port name selected by the user through the setup dialogue in the comPort variable.
 
                 LogMessage("InitialiseHardware", $"One-off initialisation complete.");
-                runOnce = true; // Set the flag to ensure that this code is not run again
+                _runOnce = true; // Set the flag to ensure that this code is not run again
             }
         }
+
+        public static bool IsInDesignMode =>
+            System.ComponentModel.DesignerProperties.GetIsInDesignMode(
+                new System.Windows.DependencyObject());
 
         // PUBLIC COM INTERFACE IFilterWheelV3 IMPLEMENTATION
 
@@ -228,23 +242,23 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
             try
             {
                 // Clean up the trace logger and utility objects
-                tl.Enabled = false;
-                tl.Dispose();
-                tl = null;
+                Tl.Enabled = false;
+                Tl.Dispose();
+                Tl = null;
             }
             catch { }
 
             try
             {
-                utilities.Dispose();
-                utilities = null;
+                Utilities.Dispose();
+                Utilities = null;
             }
             catch { }
 
             try
             {
-                astroUtilities.Dispose();
-                astroUtilities = null;
+                AstroUtilities.Dispose();
+                AstroUtilities = null;
             }
             catch { }
         }
@@ -263,7 +277,7 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
             if (newState) // We are connecting
             {
                 // Check whether this driver instance has already connected
-                if (uniqueIds.Contains(uniqueId)) // Instance already connected
+                if (_uniqueIds.Contains(uniqueId)) // Instance already connected
                 {
                     // Ignore the request, the unique ID is already in the list
                     LogMessage("SetConnected", $"Ignoring request to connect because the device is already connected.");
@@ -271,7 +285,7 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
                 else // Instance not already connected, so connect it
                 {
                     // Check whether this is the first connection to the hardware
-                    if (uniqueIds.Count == 0) // This is the first connection to the hardware so initiate the hardware connection
+                    if (_uniqueIds.Count == 0) // This is the first connection to the hardware so initiate the hardware connection
                     {
                         //
                         // Add hardware connect logic here
@@ -281,7 +295,7 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
                         {
                             lock (hardwareLock)
                             {
-                                serialPort = new SerialPort(comPort, 9600)
+                                serialPort = new SerialPort(ComPort, 9600)
                                 {
                                     NewLine = "\n",
                                     ReadTimeout = 2000,
@@ -312,14 +326,14 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
                     }
 
                     // The hardware either "already was" or "is now" connected, so add the driver unique ID to the connected list
-                    uniqueIds.Add(uniqueId);
+                    _uniqueIds.Add(uniqueId);
                     LogMessage("SetConnected", $"Unique id {uniqueId} added to the connection list.");
                 }
             }
             else // We are disconnecting
             {
                 // Check whether this driver instance has already disconnected
-                if (!uniqueIds.Contains(uniqueId)) // Instance not connected so ignore request
+                if (!_uniqueIds.Contains(uniqueId)) // Instance not connected so ignore request
                 {
                     // Ignore the request, the unique ID is not in the list
                     LogMessage("SetConnected", $"Ignoring request to disconnect because the device is already disconnected.");
@@ -327,11 +341,11 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
                 else // Instance currently connected so disconnect it
                 {
                     // Remove the driver unique ID to the connected list
-                    uniqueIds.Remove(uniqueId);
+                    _uniqueIds.Remove(uniqueId);
                     LogMessage("SetConnected", $"Unique id {uniqueId} removed from the connection list.");
 
                     // Check whether there are now any connected driver instances 
-                    if (uniqueIds.Count == 0) // There are no connected driver instances so disconnect from the hardware
+                    if (_uniqueIds.Count == 0) // There are no connected driver instances so disconnect from the hardware
                     {
                         LogMessage("SetConnected", "Disconnecting hardware.");
 
@@ -364,7 +378,7 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
 
             // Log the current connected state
             LogMessage("SetConnected", $"Currently connected driver ids:");
-            foreach (Guid id in uniqueIds)
+            foreach (Guid id in _uniqueIds)
             {
                 LogMessage("SetConnected", $" ID {id} is connected");
             }
@@ -514,7 +528,7 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
             get
             {
                 // TODO check that the driver hardware connection exists and is connected to the hardware
-                return connectedState;
+                return _connectedState;
             }
         }
 
@@ -538,8 +552,8 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
             using (Profile driverProfile = new Profile())
             {
                 driverProfile.DeviceType = "FilterWheel";
-                tl.Enabled = Convert.ToBoolean(driverProfile.GetValue(DriverProgId, traceStateProfileName, string.Empty, traceStateDefault));
-                comPort = driverProfile.GetValue(DriverProgId, comPortProfileName, string.Empty, comPortDefault);
+                Tl.Enabled = Convert.ToBoolean(driverProfile.GetValue(DriverProgId, TraceStateProfileName, string.Empty, TraceStateDefault));
+                ComPort = driverProfile.GetValue(DriverProgId, ComPortProfileName, string.Empty, ComPortDefault);
             }
         }
 
@@ -551,8 +565,8 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
             using (Profile driverProfile = new Profile())
             {
                 driverProfile.DeviceType = "FilterWheel";
-                driverProfile.WriteValue(DriverProgId, traceStateProfileName, tl.Enabled.ToString());
-                driverProfile.WriteValue(DriverProgId, comPortProfileName, comPort.ToString());
+                driverProfile.WriteValue(DriverProgId, TraceStateProfileName, Tl.Enabled.ToString());
+                driverProfile.WriteValue(DriverProgId, ComPortProfileName, ComPort.ToString());
             }
         }
 
@@ -563,7 +577,7 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
         /// <param name="message"></param>
         internal static void LogMessage(string identifier, string message)
         {
-            tl.LogMessageCrLf(identifier, message);
+            Tl.LogMessageCrLf(identifier, message);
         }
 
         /// <summary>

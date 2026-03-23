@@ -1,59 +1,68 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.IO.Ports;
-using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 
-namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
+internal class FilterWheelSerialClient : IDisposable
 {
-    internal class FilterWheelSerialClient : IDisposable
+    private readonly SerialPort _port;
+
+    public bool IsOpen => _port.IsOpen;
+
+    public Action<string>? Log { get; set; }
+
+    public FilterWheelSerialClient(string portName, int baudRate = 9600)
     {
-        private readonly SerialPort _port;
-
-        public bool IsOpen => _port.IsOpen;
-
-        public FilterWheelSerialClient(string portName, int baudRate = 115200)
+        _port = new SerialPort(portName, baudRate)
         {
-            _port = new SerialPort(portName, baudRate)
-            {
-                NewLine = "\n",
-                ReadTimeout = 2000,
-                WriteTimeout = 2000
-            };
-        }
+            NewLine = "\n",
+            ReadTimeout = 2000,
+            WriteTimeout = 2000,
+            Handshake = Handshake.None,
+            DtrEnable = true,
+            RtsEnable = true,
+            Encoding = System.Text.Encoding.ASCII
+        };
+    }
 
-        public void Open()
+    public void Open()
+    {
+        if (!_port.IsOpen)
         {
-            if (!_port.IsOpen)
-                _port.Open();
-        }
-
-        public void Close()
-        {
-            if (_port.IsOpen)
-                _port.Close();
-        }
-
-        public async Task<string> SendCommandAsync(string command)
-        {
-            if (!_port.IsOpen)
-                throw new InvalidOperationException("Serial port is not open.");
-
-            // Write command
-            _port.WriteLine(command);
-
-            // Read response asynchronously
-            return await Task.Run(() => _port.ReadLine().Trim());
-        }
-
-        public void Dispose()
-        {
-            if (_port.IsOpen)
-                _port.Close();
-
-            _port.Dispose();
+            _port.Open();
+            _port.DiscardInBuffer();
+            _port.DiscardOutBuffer();
+            System.Threading.Thread.Sleep(200); // Allow Arduino reset
         }
     }
 
+    public void Close()
+    {
+        if (_port.IsOpen)
+            _port.Close();
+    }
+
+    public async Task<string> SendCommandAsync(string command)
+    {
+        if (!_port.IsOpen)
+            throw new InvalidOperationException("Serial port is not open.");
+
+        Log?.Invoke($"TX: {command}");
+        _port.WriteLine(command);
+
+        var response = await Task.Run(() => _port.ReadLine().Trim());
+        Log?.Invoke($"RX: {response}");
+
+        return response;
+    }
+
+    public string SendCommand(string command)
+        => SendCommandAsync(command).GetAwaiter().GetResult();
+
+    public void Dispose()
+    {
+        if (_port.IsOpen)
+            _port.Close();
+
+        _port.Dispose();
+    }
 }

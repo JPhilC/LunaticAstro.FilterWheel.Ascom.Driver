@@ -38,17 +38,20 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
     [ComVisible(true)]
     [Guid("4666e34b-23d9-4487-b0fc-1468e1250f44")]
     [ProgId("ASCOM.LunaticAstroDiyFilterWheel.FilterWheel")]
-    [ServedClassName("ASCOM FilterWheel Driver for LunaticAstroDiyFilterWheel")] // Driver description that appears in the Chooser, customise as required
+    [ServedClassName("Lunatic Astro Nano Filter Wheel")] // Driver description that appears in the Chooser, customise as required
     [ClassInterface(ClassInterfaceType.None)]
     public class FilterWheel : ReferenceCountedObjectBase, IFilterWheelV3, IDisposable
     {
         internal static string DriverProgId; // ASCOM DeviceID (COM ProgID) for this driver, the value is retrieved from the ServedClassName attribute in the class initialiser.
         internal static string DriverDescription; // The value is retrieved from the ServedClassName attribute in the class initialiser.
 
+        private readonly Profile _profile;
+        private FilterWheelService _service;
         // connectedState and connectingState holds the states from this driver instance's perspective, as opposed to the local server's perspective, which may be different because of other client connections.
-        internal bool connectedState; // The connected state from this driver's perspective)
-        internal bool connectingState; // The connecting state from this driver's perspective)
-        internal Exception connectionException = null; // Record any exception thrown if the driver encounters an error when connecting to the hardware using Connect() or Disconnect
+        internal bool _connectedState; // The connected state from this driver's perspective)
+        internal bool _connectingState; // The connecting state from this driver's perspective)
+        internal Exception _connectionException = null; // Record any exception thrown if the driver encounters an error when connecting to the hardware using Connect() or Disconnect
+        private int _filterCount;
 
         internal TraceLogger tl; // Trace logger object to hold diagnostic information just for this instance of the driver, as opposed to the local server's log, which includes activity from all driver instances.
         private bool disposedValue;
@@ -85,7 +88,7 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
                 LogMessage("FilterWheel", "Starting driver initialisation");
                 LogMessage("FilterWheel", $"ProgID: {DriverProgId}, Description: {DriverDescription}");
 
-                connectedState = false; // Initialise connected to false
+                _connectedState = false; // Initialise connected to false
 
                 // Create a unique ID to identify this driver instance
                 uniqueId = Guid.NewGuid();
@@ -203,15 +206,32 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
             if (System.Windows.Forms.Application.OpenForms.Count > 0)
                 return;
 
+            var t = new System.Threading.Thread(() =>
+            {
+                ShowSetupDialogInternal();
+            });
+
+            t.SetApartmentState(System.Threading.ApartmentState.STA);
+            t.Start();
+            t.Join();
+        }
+
+        private void ShowSetupDialogInternal()
+        {
+            // Prevent multiple dialogs (template requirement)
+            if (System.Windows.Forms.Application.OpenForms.Count > 0)
+                return;
+
             using (var form = new System.Windows.Forms.Form())
             {
-                form.Text = "Lunatic Astro DIY FilterWheel Setup";
+                form.Text = "Lunatic Astro Nano Filter Wheel Setup";
                 form.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
                 form.MaximizeBox = false;
                 form.MinimizeBox = false;
-                form.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
-                form.Width = 480;
-                form.Height = 260;
+                form.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
+                form.ShowInTaskbar = false;
+                form.Width = 800;
+                form.Height = 600;
 
                 var host = new System.Windows.Forms.Integration.ElementHost
                 {
@@ -228,9 +248,18 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
                 {
                     vm.CloseRequested += result =>
                     {
-                        form.DialogResult = result
-                            ? System.Windows.Forms.DialogResult.OK
-                            : System.Windows.Forms.DialogResult.Cancel;
+                        if (result)
+                        {
+                            // ViewModel has already saved settings.
+                            // Reload settings into FilterWheelHardware.
+                            FilterWheelHardware.InitialiseHardware();
+
+                            form.DialogResult = System.Windows.Forms.DialogResult.OK;
+                        }
+                        else
+                        {
+                            form.DialogResult = System.Windows.Forms.DialogResult.Cancel;
+                        }
 
                         form.Close();
                     };
@@ -375,15 +404,15 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
         {
             try
             {
-                if (connectedState)
+                if (_connectedState)
                 {
                     LogMessage("Connect", "Device already connected, ignoring method");
                     return;
                 }
 
                 // Initialise connection variables
-                connectionException = null; // Clear any previous exception
-                connectingState = true;
+                _connectionException = null; // Clear any previous exception
+                _connectingState = true;
 
                 // Start a task to connect to the hardware and then set the connected state to true
                 _ = Task.Run(() =>
@@ -392,18 +421,18 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
                     {
                         LogMessage("Connect Task", "Starting connection");
                         FilterWheelHardware.SetConnected(uniqueId, true);
-                        connectedState = true;
+                        _connectedState = true;
                         LogMessage("Connect Task", "Connection completed");
                     }
                     catch (Exception ex)
                     {
                         // Something went wrong so save the returned exception to return through Connecting and log the event.
-                        connectionException = ex;
+                        _connectionException = ex;
                         LogMessage("Connect Task", $"The connect task threw an exception: {ex.Message}\r\n{ex}");
                     }
                     finally
                     {
-                        connectingState = false;
+                        _connectingState = false;
                     }
                 });
             }
@@ -426,9 +455,8 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
             {
                 try
                 {
-                    // Returns the driver's connection state rather than the local server's connected state, which could be different because there may be other client connections still active.
-                    LogMessage("Connected Get", connectedState.ToString());
-                    return connectedState;
+                    LogMessage("Connected Get", _connectedState.ToString());
+                    return _connectedState;
                 }
                 catch (Exception ex)
                 {
@@ -440,7 +468,7 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
             {
                 try
                 {
-                    if (value == connectedState)
+                    if (value == _connectedState)
                     {
                         LogMessage("Connected Set", "Device already connected, ignoring Connected Set = true");
                         return;
@@ -450,13 +478,27 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
                     {
                         LogMessage("Connected Set", "Connecting to device...");
                         FilterWheelHardware.SetConnected(uniqueId, true);
+
+                        string comPort = FilterWheelHardware.ComPort;
+
+                        _service = new FilterWheelService(comPort);
+                        _service.Connect();
+
+                        // Optional but recommended:
+                        // _filterCount = _service.GetFilterSlotCountAsync().Result;
+
                         LogMessage("Connected Set", "Connected OK");
-                        connectedState = true;
+                        _connectedState = true;
                     }
                     else
                     {
-                        connectedState = false;
+                        _connectedState = false;
                         LogMessage("Connected Set", "Disconnecting from device...");
+
+                        _service?.Disconnect();
+                        _service?.Dispose();
+                        _service = null;
+
                         FilterWheelHardware.SetConnected(uniqueId, false);
                         LogMessage("Connected Set", "Disconnected OK");
                     }
@@ -477,11 +519,11 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
             get
             {
                 // Return any exception returned by the Connect() or Disconnect() methods
-                if (!(connectionException is null))
-                    throw connectionException;
+                if (!(_connectionException is null))
+                    throw _connectionException;
 
                 // Otherwise return the current connecting state
-                return connectingState;
+                return _connectingState;
             }
         }
 
@@ -492,15 +534,15 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
         {
             try
             {
-                if (!connectedState)
+                if (!_connectedState)
                 {
                     LogMessage("Disconnect", "Device already disconnected, ignoring method");
                     return;
                 }
 
                 // Initialise connection variables
-                connectionException = null; // Clear any previous exception
-                connectingState = true;
+                _connectionException = null; // Clear any previous exception
+                _connectingState = true;
 
                 // Start a task to connect to the hardware and then set the connected state to true
                 _ = Task.Run(() =>
@@ -509,18 +551,18 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
                     {
                         LogMessage("Disconnect Task", "Calling Connected");
                         FilterWheelHardware.SetConnected(uniqueId, false);
-                        connectedState = false;
+                        _connectedState = false;
                         LogMessage("Disconnect Task", "Disconnection completed");
                     }
                     catch (Exception ex)
                     {
                         // Something went wrong so save the returned exception to return through Connecting and log the event.
-                        connectionException = ex;
+                        _connectionException = ex;
                         LogMessage("Disconnect Task", $"The disconnect task threw an exception: {ex.Message}\r\n{ex}");
                     }
                     finally
                     {
-                        connectingState = false;
+                        _connectingState = false;
                     }
                 });
             }
@@ -770,7 +812,7 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
         /// <param name="message"></param>
         private void CheckConnected(string message)
         {
-            if (!connectedState)
+            if (!_connectedState)
             {
                 throw new NotConnectedException($"{DriverDescription} ({DriverProgId}) is not connected: {message}");
             }
@@ -803,7 +845,7 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
             using (Profile driverProfile = new Profile())
             {
                 driverProfile.DeviceType = "FilterWheel";
-                tl.Enabled = Convert.ToBoolean(driverProfile.GetValue(DriverProgId, FilterWheelHardware.traceStateProfileName, string.Empty, FilterWheelHardware.traceStateDefault));
+                tl.Enabled = Convert.ToBoolean(driverProfile.GetValue(DriverProgId, FilterWheelHardware.TraceStateProfileName, string.Empty, FilterWheelHardware.TraceStateDefault));
             }
         }
 

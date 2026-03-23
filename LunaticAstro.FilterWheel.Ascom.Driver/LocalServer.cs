@@ -626,7 +626,6 @@ namespace ASCOM.LocalServer
                         TL.LogMessage("ProcessArguments", $"Started by COM: {args[0]}");
                         startedByCOM = true; // Indicate COM started us and continue
                         returnStatus = true; // Continue on return
-                        Debugger.Launch();
                         break;
 
                     case "-register":
