@@ -18,6 +18,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO.Ports;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Windows.Forms.Integration;
@@ -51,6 +52,7 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
 
         private static bool _connectedState; // Local server's connected state
         private static bool _runOnce = false; // Flag to enable "one-off" activities only to run once.
+        private static FilterWheelService? _service;
         internal static Util Utilities; // ASCOM Utilities object for use as required
         internal static AstroUtils AstroUtilities; // ASCOM AstroUtilities object for use as required
         internal static TraceLogger Tl; // Local server's trace logger object for diagnostic log with information that you specify
@@ -263,7 +265,6 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
             catch { }
         }
 
-        private static SerialPort serialPort; // Class level variable to hold the serial port object if required for hardware communication 
         private static object hardwareLock = new object(); // Lock object to synchronise access to the serialPorts dictionary
 
         /// <summary>
@@ -273,114 +274,71 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
         /// <param name="newState">New state: Connected or Disconnected</param>
         public static void SetConnected(Guid uniqueId, bool newState)
         {
-            // Check whether we are connecting or disconnecting
-            if (newState) // We are connecting
+            bool firstConnection = false;
+            lock (hardwareLock)
             {
-                // Check whether this driver instance has already connected
-                if (_uniqueIds.Contains(uniqueId)) // Instance already connected
+                if (newState)
                 {
-                    // Ignore the request, the unique ID is already in the list
-                    LogMessage("SetConnected", $"Ignoring request to connect because the device is already connected.");
-                }
-                else // Instance not already connected, so connect it
-                {
-                    // Check whether this is the first connection to the hardware
-                    if (_uniqueIds.Count == 0) // This is the first connection to the hardware so initiate the hardware connection
+                    if (!_uniqueIds.Contains(uniqueId))
                     {
-                        //
-                        // Add hardware connect logic here
-                        //
-                        LogMessage("SetConnected", $"Connecting to hardware.");
-                        try
+                        if (_uniqueIds.Count == 0)
                         {
-                            lock (hardwareLock)
-                            {
-                                serialPort = new SerialPort(ComPort, 9600)
-                                {
-                                    NewLine = "\n",
-                                    ReadTimeout = 2000,
-                                    WriteTimeout = 2000
-                                };
-
-                                serialPort.Open();
-
-                                // Optional: handshake with Arduino
-                                serialPort.WriteLine("P0"); // e.g. get current position
-                                string response = serialPort.ReadLine();
-
-                                LogMessage("SetConnected", $"Hardware connected. Arduino responded: {response}");
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            LogMessage("SetConnected", $"Hardware connection failed: {ex.Message}");
-                            throw new ASCOM.DriverException("Failed to connect to filter wheel hardware.", ex);
+                            firstConnection = true;
+                            _service = new FilterWheelService(ComPort);
                         }
 
-
+                        _uniqueIds.Add(uniqueId);
+                        LogMessage("SetConnected", $"Unique id {uniqueId} added.");
                     }
-                    else // Other device instances are connected so the hardware is already connected
-                    {
-                        // Since the hardware is already connected no action is required
-                        LogMessage("SetConnected", $"Hardware already connected.");
-                    }
-
-                    // The hardware either "already was" or "is now" connected, so add the driver unique ID to the connected list
-                    _uniqueIds.Add(uniqueId);
-                    LogMessage("SetConnected", $"Unique id {uniqueId} added to the connection list.");
                 }
-            }
-            else // We are disconnecting
-            {
-                // Check whether this driver instance has already disconnected
-                if (!_uniqueIds.Contains(uniqueId)) // Instance not connected so ignore request
+                else
                 {
-                    // Ignore the request, the unique ID is not in the list
-                    LogMessage("SetConnected", $"Ignoring request to disconnect because the device is already disconnected.");
-                }
-                else // Instance currently connected so disconnect it
-                {
-                    // Remove the driver unique ID to the connected list
-                    _uniqueIds.Remove(uniqueId);
-                    LogMessage("SetConnected", $"Unique id {uniqueId} removed from the connection list.");
-
-                    // Check whether there are now any connected driver instances 
-                    if (_uniqueIds.Count == 0) // There are no connected driver instances so disconnect from the hardware
+                    if (_uniqueIds.Contains(uniqueId))
                     {
-                        LogMessage("SetConnected", "Disconnecting hardware.");
+                        _uniqueIds.Remove(uniqueId);
+                        LogMessage("SetConnected", $"Unique id {uniqueId} removed.");
 
-                        try
+                        if (_uniqueIds.Count == 0)
                         {
-                            lock (hardwareLock)
-                            {
-                                if (serialPort != null)
-                                {
-                                    if (serialPort.IsOpen)
-                                        serialPort.Close();
-
-                                    serialPort.Dispose();
-                                    serialPort = null;
-                                }
-                            }
+                            _service?.Disconnect();
+                            _service?.Dispose();
+                            _service = null;
                         }
-                        catch (Exception ex)
-                        {
-                            LogMessage("SetConnected", $"Hardware disconnect failed: {ex.Message}");
-                        }
-                    }
-                    else // Other device instances are connected so do not disconnect the hardware
-                    {
-                        // No action is required
-                        LogMessage("SetConnected", $"Hardware already connected.");
                     }
                 }
             }
 
-            // Log the current connected state
-            LogMessage("SetConnected", $"Currently connected driver ids:");
-            foreach (Guid id in _uniqueIds)
+            // -----------------------------------------
+            // Perform hardware actions OUTSIDE the lock
+            // -----------------------------------------
+
+            if (firstConnection)
             {
-                LogMessage("SetConnected", $" ID {id} is connected");
+                try
+                {
+                    LogMessage("SetConnected", "Connecting to hardware.");
+                    _service.Connect();
+
+                    // Safe synchronous call
+                    fwSlots = (short)_service.GetFilterSlotCountAsync().GetAwaiter().GetResult();
+                    fwPosition = _service.GetCurrentPositionAsync().GetAwaiter().GetResult();
+                    fwPositionOffsets = _service.GetPositionOffsetsAsync(fwSlots).GetAwaiter().GetResult();
+
+                    LogMessage("SetConnected", $"Hardware connected. Current position: {fwPosition}");
+                }
+                catch (Exception ex)
+                {
+                    LogMessage("SetConnected", $"Hardware connection failed: {ex.Message}");
+                    throw new ASCOM.DriverException("Failed to connect to filter wheel hardware.", ex);
+                }
+            }
+
+            // Log state
+            lock (hardwareLock)
+            {
+                LogMessage("SetConnected", "Currently connected driver ids:");
+                foreach (var id in _uniqueIds)
+                    LogMessage("SetConnected", $" ID {id} is connected");
             }
         }
 
@@ -445,10 +403,9 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
         /// </summary>
         public static string Name
         {
-            // TODO customise this device name as required
             get
             {
-                string name = "Short driver name - please customise";
+                string name = "Lunatic Astro Nano Filter Wheel";
                 LogMessage("Name Get", name);
                 return name;
             }
@@ -457,9 +414,10 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
         #endregion
 
         #region IFilerWheel Implementation
-        private static int[] fwOffsets = new int[4] { 0, 0, 0, 0 }; //class level variable to hold focus offsets
-        private static string[] fwNames = new string[4] { "Red", "Green", "Blue", "Clear" }; //class level variable to hold the filter names
-        private static short fwPosition = 0; // class level variable to retain the current filter wheel position
+        private static List<int> fwPositionOffsets = new List<int>(); //class level variable to hold focus offsets
+        private static List<string> fwNames = new List<string> { "Red", "Green", "Blue", "Clear" }; //class level variable to hold the filter names
+        private static short fwPosition = 0;    // class level variable to retain the current filter wheel position
+        private static short fwSlots = 0;       // class level variable to hold the number of filter slots in the wheel
 
         /// <summary>
         /// Focus offset of each filter in the wheel
@@ -468,12 +426,12 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
         {
             get
             {
-                foreach (int fwOffset in fwOffsets) // Write filter offsets to the log
+                foreach (int fwOffset in fwPositionOffsets) // Write filter offsets to the log
                 {
                     LogMessage("FocusOffsets Get", fwOffset.ToString());
                 }
 
-                return fwOffsets;
+                return fwPositionOffsets.ToArray();
             }
         }
 
@@ -489,7 +447,7 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
                     LogMessage("Names Get", fwName);
                 }
 
-                return fwNames;
+                return fwNames.ToArray();
             }
         }
 
@@ -506,12 +464,13 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
             set
             {
                 LogMessage("Position Set", value.ToString());
-                if ((value < 0) | (value > fwNames.Length - 1))
+                if ((value < 0) | (value > fwSlots-1))
                 {
-                    LogMessage("", "Throwing InvalidValueException - Position: " + value.ToString() + ", Range: 0 to " + (fwNames.Length - 1).ToString());
-                    throw new InvalidValueException("Position", value.ToString(), "0 to " + (fwNames.Length - 1).ToString());
+                    LogMessage("", "Throwing InvalidValueException - Position: " + value.ToString() + ", Range: 0 to " + (fwSlots - 1).ToString());
+                    throw new InvalidValueException("Position", value.ToString(), "0 to " + (fwSlots - 1).ToString());
                 }
-                fwPosition = value;
+                var result = _service.GoToPositionAsync((short)(value + 1)).GetAwaiter().GetResult();
+                fwPosition = (short)(result -1);
             }
         }
 
@@ -577,6 +536,7 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
         /// <param name="message"></param>
         internal static void LogMessage(string identifier, string message)
         {
+            System.Diagnostics.Debug.WriteLine($"{identifier}: {message}");
             Tl.LogMessageCrLf(identifier, message);
         }
 

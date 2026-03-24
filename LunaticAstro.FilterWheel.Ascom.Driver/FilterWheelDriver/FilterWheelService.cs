@@ -1,7 +1,9 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using System.Windows.Documents;
 
 namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
 {
@@ -14,6 +16,8 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
         public FilterWheelService(string comPort, int baudRate = 115200)
         {
             _client = new FilterWheelSerialClient(comPort, baudRate);
+            // Attach logging
+            _client.Log = msg => FilterWheelHardware.LogMessage("Serial", msg);
         }
 
         public void Connect()
@@ -38,7 +42,7 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
         // 1. MOVEMENT COMMANDS
         // ------------------------------------------------------------
 
-        public async Task<int> GoToPositionAsync(int position)
+        public async Task<short> GoToPositionAsync(short position)
         {
             if (position < 0 || position > 8)
                 throw new ArgumentOutOfRangeException(nameof(position));
@@ -55,10 +59,21 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
         }
 
         // ------------------------------------------------------------
-        // 2. OFFSET COMMANDS
+        // 2. POSITION OFFSET COMMANDS
         // ------------------------------------------------------------
 
-        public async Task<(int position, int offset)> GetOffsetForFilterAsync(int position)
+        public async Task<List<int>> GetPositionOffsetsAsync(short slotCount)
+        {
+            List<int> offsets = new List<int>();
+            for (int i = 1; i <= slotCount; i++)
+            {
+                var response = await _client.SendCommandAsync($"O{i}");
+                offsets.Add(ParsePositionOffset(response).offset);
+            }
+            return offsets;
+        }
+
+        public async Task<(short position, int offset)> GetPositionOffsetForFilterAsync(int position)
         {
             if (position < 1 || position > 8)
                 throw new ArgumentOutOfRangeException(nameof(position));
@@ -67,19 +82,19 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
             return ParsePositionOffset(response);
         }
 
-        public async Task<(int position, int offset)> IncrementOffsetAsync()
+        public async Task<(int position, int offset)> IncrementPositionOffsetAsync()
         {
             var response = await _client.SendCommandAsync(")");
             return ParsePositionOffset(response);
         }
 
-        public async Task<(int position, int offset)> DecrementOffsetAsync()
+        public async Task<(int position, int offset)> DecrementPositionOffsetAsync()
         {
             var response = await _client.SendCommandAsync("(");
             return ParsePositionOffset(response);
         }
 
-        public async Task<(int position, int offset)> SetAbsoluteOffsetAsync(int value)
+        public async Task<(int position, int offset)> SetAbsolutePositionOffsetAsync(int value)
         {
             var response = await _client.SendCommandAsync($"F{value}");
             return ParsePositionOffset(response);
@@ -95,7 +110,7 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
         public async Task<string> GetFirmwareVersionAsync()
             => await _client.SendCommandAsync("I1");
 
-        public async Task<int> GetCurrentPositionAsync()
+        public async Task<short> GetCurrentPositionAsync()
         {
             var response = await _client.SendCommandAsync("I2");
             return ParsePosition(response);
@@ -296,19 +311,19 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
         // PARSING HELPERS
         // ------------------------------------------------------------
 
-        private static int ParsePosition(string response)
+        private static short ParsePosition(string response)
         {
             // "P<n>"
             if (!response.StartsWith("P", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException($"Unexpected position response: '{response}'");
 
-            if (!int.TryParse(response.Substring(1), out var pos))
+            if (!short.TryParse(response.Substring(1), out var pos))
                 throw new InvalidOperationException($"Invalid position value in '{response}'");
 
             return pos;
         }
 
-        private static (int position, int offset) ParsePositionOffset(string response)
+        private static (short position, int offset) ParsePositionOffset(string response)
         {
             // "P<n> Offset X"
             // Use regex for robustness
@@ -318,7 +333,7 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
             if (!match.Success)
                 throw new InvalidOperationException($"Unexpected position/offset response: '{response}'");
 
-            var pos = int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
+            var pos = short.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
             var offset = int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
             return (pos, offset);
         }

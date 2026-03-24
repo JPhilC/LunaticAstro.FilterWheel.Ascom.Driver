@@ -8,20 +8,31 @@
 		<AssemblyName>ASCOM.LunaticAstro.Diy.FilterWheel</AssemblyName>
 		<Nullable>disable</Nullable>
 		<ImplicitUsings>disable</ImplicitUsings>
-		<BaseOutputPath>bin</BaseOutputPath>
+		<BaseOutputPath>bin\$(Configuration)\</BaseOutputPath>
 		<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
 		<AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
 		<GenerateAssemblyInfo>false</GenerateAssemblyInfo>
 		<AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
 		<Deterministic>true</Deterministic>
 		<StartupObject>ASCOM.LocalServer.Server</StartupObject>
-		<Platforms>AnyCPU;x86</Platforms>
+		<Platforms>x86</Platforms>
 	</PropertyGroup>
 
 	<PropertyGroup>
 		<LangVersion>latest</LangVersion>
 	</PropertyGroup>
-	
+
+	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x86'">
+		<Optimize>false</Optimize>
+		<DebugType>full</DebugType>
+		<DebugSymbols>true</DebugSymbols>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x86'">
+		<Optimize>true</Optimize>
+		<DebugType>pdbonly</DebugType>
+	</PropertyGroup>
+
 	<!-- Optional: Enable COM registration for ASCOM -->
 	<!--
   <PropertyGroup>

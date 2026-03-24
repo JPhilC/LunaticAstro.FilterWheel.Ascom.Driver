@@ -453,63 +453,42 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
         {
             get
             {
-                try
-                {
-                    LogMessage("Connected Get", _connectedState.ToString());
-                    return _connectedState;
-                }
-                catch (Exception ex)
-                {
-                    LogMessage("Connected Get", $"Threw an exception: \r\n{ex}");
-                    throw;
-                }
+                LogMessage("Connected Get", _connectedState.ToString());
+                return _connectedState;
             }
             set
             {
+                if (value == _connectedState)
+                {
+                    LogMessage("Connected Set", "Ignoring duplicate state change.");
+                    return;
+                }
+
                 try
                 {
-                    if (value == _connectedState)
-                    {
-                        LogMessage("Connected Set", "Device already connected, ignoring Connected Set = true");
-                        return;
-                    }
-
                     if (value)
                     {
-                        LogMessage("Connected Set", "Connecting to device...");
+                        LogMessage("Connected Set", "Connecting...");
                         FilterWheelHardware.SetConnected(uniqueId, true);
-
-                        string comPort = FilterWheelHardware.ComPort;
-
-                        _service = new FilterWheelService(comPort);
-                        _service.Connect();
-
-                        // Optional but recommended:
-                        // _filterCount = _service.GetFilterSlotCountAsync().Result;
-
-                        LogMessage("Connected Set", "Connected OK");
                         _connectedState = true;
+                        LogMessage("Connected Set", "Connected OK");
                     }
                     else
                     {
-                        _connectedState = false;
-                        LogMessage("Connected Set", "Disconnecting from device...");
-
-                        _service?.Disconnect();
-                        _service?.Dispose();
-                        _service = null;
-
+                        LogMessage("Connected Set", "Disconnecting...");
                         FilterWheelHardware.SetConnected(uniqueId, false);
+                        _connectedState = false;
                         LogMessage("Connected Set", "Disconnected OK");
                     }
                 }
                 catch (Exception ex)
                 {
-                    LogMessage("Connected Set", $"Threw an exception: {ex.Message}\r\n{ex}");
+                    LogMessage("Connected Set", $"Exception: {ex.Message}");
                     throw;
                 }
             }
         }
+
 
         /// <summary>
         /// Completion variable for the asynchronous Connect() and Disconnect()  methods
