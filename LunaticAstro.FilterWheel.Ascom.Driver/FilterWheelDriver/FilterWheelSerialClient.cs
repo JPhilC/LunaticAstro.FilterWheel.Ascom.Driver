@@ -90,23 +90,62 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
         }
 
         // Core synchronous implementation
-        public string SendCommand(string command)
+        public void SendCommand(string command)
         {
             if (!_port.IsOpen)
                 throw new InvalidOperationException("Serial port is not open.");
 
             Log?.Invoke($"TX: {command}");
             _port.WriteLine(command);
-
-            string response = _port.ReadLine().Trim();
-            Log?.Invoke($"RX: {response}");
-
-            return response;
         }
 
         // Async wrapper for existing service code
-        public Task<string> SendCommandAsync(string command)
+        public Task SendCommandAsync(string command)
             => Task.Run(() => SendCommand(command));
+
+        public async Task<string> ReadLineAsync(CancellationToken token)
+        {
+            if (!_port.IsOpen)
+                throw new InvalidOperationException("Serial port is not open.");
+
+            return await Task.Run(() =>
+            {
+                while (true)
+                {
+                    token.ThrowIfCancellationRequested();
+
+                    try
+                    {
+                        var line = _port.ReadLine().Trim();
+                        if (!string.IsNullOrWhiteSpace(line))
+                        {
+                            Log?.Invoke($"RX: {line}");
+                            return line;
+                        }
+                    }
+                    catch (TimeoutException)
+                    {
+                        // keep waiting
+                    }
+                }
+            }, token);
+        }
+
+        public async Task<string> WaitForResponseAsync(
+                Func<string, bool> predicate,
+                CancellationToken cancellationToken = default)
+        {
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var line = await ReadLineAsync(cancellationToken);
+
+                if (predicate(line))
+                    return line;
+            }
+        }
+
 
         public void Dispose()
         {

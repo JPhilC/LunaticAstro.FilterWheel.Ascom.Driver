@@ -228,22 +228,25 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
                 form.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog;
                 form.MaximizeBox = false;
                 form.MinimizeBox = false;
-                form.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
+                form.StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
                 form.ShowInTaskbar = false;
-                form.Width = 800;
-                form.Height = 600;
+                form.Width = 630;
+                form.Height = 380;
 
                 var host = new System.Windows.Forms.Integration.ElementHost
                 {
                     Dock = System.Windows.Forms.DockStyle.Fill
                 };
+                
+                // System.Diagnostics.Debugger.Launch();
 
-                var control = new Views.SetupDialogControl();
+                var control = new Views.SetupDialogControl(new SetupViewModel(uniqueId));
                 host.Child = control;
 
                 form.Controls.Add(host);
 
                 // Hook ViewModel close event
+
                 if (control.DataContext is SetupViewModel vm)
                 {
                     vm.CloseRequested += result =>
@@ -264,6 +267,14 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
                         form.Close();
                     };
                 }
+
+                // Ensure the form appears uppermost
+                form.Shown += (s, e) =>
+                {
+                    form.TopMost = true;
+                    form.BringToFront();
+                    form.Activate();
+                };
 
                 form.ShowDialog();
             }
@@ -679,7 +690,7 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
                 try
                 {
                     CheckConnected("FocusOffsets");
-                    int[] focusoffsets = FilterWheelHardware.FocusOffsets;
+                    int[] focusoffsets = FilterWheelHardware.Offsets;
                     LogMessage("FocusOffsets", focusoffsets.ToString());
                     return focusoffsets;
                 }

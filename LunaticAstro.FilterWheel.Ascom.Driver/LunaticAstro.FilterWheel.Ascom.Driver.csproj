@@ -17,7 +17,14 @@
 		<StartupObject>ASCOM.LocalServer.Server</StartupObject>
 		<Platforms>x86</Platforms>
 	</PropertyGroup>
-
+	
+	<!-- Enable generation of compiler-generated files for MVVM source generators -->
+	<PropertyGroup>
+		<EnableDefaultCompileItems>true</EnableDefaultCompileItems>
+		<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+		<CompilerGeneratedFilesOutputPath>$(BaseIntermediateOutputPath)\Generated</CompilerGeneratedFilesOutputPath>
+	</PropertyGroup>
+	
 	<PropertyGroup>
 		<LangVersion>latest</LangVersion>
 	</PropertyGroup>
@@ -32,6 +39,11 @@
 		<Optimize>true</Optimize>
 		<DebugType>pdbonly</DebugType>
 	</PropertyGroup>
+
+	<ItemGroup>
+	  <None Remove="Resources\ASCOM.ico" />
+	  <None Remove="Resources\ASCOM.png" />
+	</ItemGroup>
 
 	<!-- Optional: Enable COM registration for ASCOM -->
 	<!--
@@ -82,6 +94,11 @@
 
 	<ItemGroup>
 	  <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.1" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <Resource Include="Resources\ASCOM.ico" />
+	  <Resource Include="Resources\ASCOM.png" />
 	</ItemGroup>
 
 	<!-- Resources and settings are auto‑included, but we preserve generators -->

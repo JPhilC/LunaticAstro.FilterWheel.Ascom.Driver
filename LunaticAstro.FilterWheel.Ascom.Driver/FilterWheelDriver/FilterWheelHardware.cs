@@ -286,7 +286,7 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
                             firstConnection = true;
                             _service = new FilterWheelService(ComPort);
                         }
-
+                        _connectedState = true;
                         _uniqueIds.Add(uniqueId);
                         LogMessage("SetConnected", $"Unique id {uniqueId} added.");
                     }
@@ -303,6 +303,7 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
                             _service?.Disconnect();
                             _service?.Dispose();
                             _service = null;
+                            _connectedState = false;
                         }
                     }
                 }
@@ -320,11 +321,11 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
                     _service.Connect();
 
                     // Safe synchronous call
-                    fwSlots = (short)_service.GetFilterSlotCountAsync().GetAwaiter().GetResult();
-                    fwPosition = _service.GetCurrentPositionAsync().GetAwaiter().GetResult();
-                    fwPositionOffsets = _service.GetPositionOffsetsAsync(fwSlots).GetAwaiter().GetResult();
-
-                    LogMessage("SetConnected", $"Hardware connected. Current position: {fwPosition}");
+                    _slotCount = (short)_service.GetFilterSlotCountAsync().GetAwaiter().GetResult();
+                    _currentPosition = (short)_service.GetCurrentPositionAsync().GetAwaiter().GetResult();
+                    _filterOffsets = _service.GetOffsetsAsync(_slotCount).GetAwaiter().GetResult();
+                    _filterNames = _service.GetNamesAsync(_slotCount).GetAwaiter().GetResult();
+                    LogMessage("SetConnected", $"Hardware connected. Current position: {_currentPosition}");
                 }
                 catch (Exception ex)
                 {
@@ -414,24 +415,25 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
         #endregion
 
         #region IFilerWheel Implementation
-        private static List<int> fwPositionOffsets = new List<int>(); //class level variable to hold focus offsets
-        private static List<string> fwNames = new List<string> { "Red", "Green", "Blue", "Clear" }; //class level variable to hold the filter names
-        private static short fwPosition = 0;    // class level variable to retain the current filter wheel position
-        private static short fwSlots = 0;       // class level variable to hold the number of filter slots in the wheel
-
+        private static int[] _filterOffsets = new int[0];       //class level variable to hold filter positional offsets
+        private static int[] _focusOffsets = new int[0];        // class level variable to hold filter focus offsets
+        private static string[] _filterNames = new string[0];   // class level variable to hold filter names
+        private static short _currentPosition = 0;              // class level variable to retain the current filter wheel position
+        private static short _slotCount = 0;                    // class level variable to hold the number of filter slots in the wheel
+        
         /// <summary>
         /// Focus offset of each filter in the wheel
         /// </summary>
-        internal static int[] FocusOffsets
+        internal static int[] Offsets
         {
             get
             {
-                foreach (int fwOffset in fwPositionOffsets) // Write filter offsets to the log
+                foreach (int fwOffset in _filterOffsets) // Write filter offsets to the log
                 {
                     LogMessage("FocusOffsets Get", fwOffset.ToString());
                 }
 
-                return fwPositionOffsets.ToArray();
+                return _filterOffsets;
             }
         }
 
@@ -442,12 +444,12 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
         {
             get
             {
-                foreach (string fwName in fwNames) // Write filter names to the log
+                foreach (string fwName in _filterNames) // Write filter names to the log
                 {
                     LogMessage("Names Get", fwName);
                 }
 
-                return fwNames.ToArray();
+                return _filterNames;
             }
         }
 
@@ -458,19 +460,19 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
         {
             get
             {
-                LogMessage("Position Get", fwPosition.ToString());
-                return fwPosition;
+                LogMessage("Position Get", _currentPosition.ToString());
+                return _currentPosition;
             }
             set
             {
                 LogMessage("Position Set", value.ToString());
-                if ((value < 0) | (value > fwSlots-1))
+                if ((value < 0) | (value > _slotCount-1))
                 {
-                    LogMessage("", "Throwing InvalidValueException - Position: " + value.ToString() + ", Range: 0 to " + (fwSlots - 1).ToString());
-                    throw new InvalidValueException("Position", value.ToString(), "0 to " + (fwSlots - 1).ToString());
+                    LogMessage("", "Throwing InvalidValueException - Position: " + value.ToString() + ", Range: 0 to " + (_slotCount - 1).ToString());
+                    throw new InvalidValueException("Position", value.ToString(), "0 to " + (_slotCount - 1).ToString());
                 }
                 var result = _service.GoToPositionAsync((short)(value + 1)).GetAwaiter().GetResult();
-                fwPosition = (short)(result -1);
+                _currentPosition = (short)(result -1);
             }
         }
 
@@ -530,6 +532,62 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
         }
 
         /// <summary>
+        /// Reads the filter offsets from the ASCOM Profile store and updates the internal _filterOffsets array. This should be called during initialisation to load any saved offsets from the profile. The offsets are logged for diagnostic purposes.
+        /// </summary>
+        internal static int[] ReadFocusOffsetsFromProfile()
+        {
+            // Ensure the array is the correct size
+            _focusOffsets = new int[_slotCount];
+
+            using (var driverProfile = new Profile())
+            {
+                driverProfile.DeviceType = "FilterWheel";
+
+                for (int i = 0; i < _slotCount; i++)
+                {
+                    string key = $"Filter{i + 1}Offset";
+                    string offsetStr = driverProfile.GetValue(DriverProgId, key, string.Empty, "0");
+
+                    if (int.TryParse(offsetStr, out int offset))
+                    {
+                        _focusOffsets[i] = offset;
+                        LogMessage("ReadFocusOffsetsFromProfile",
+                            $"Filter {i + 1} offset read from profile: {offset}");
+                    }
+                    else
+                    {
+                        _focusOffsets[i] = 0;
+                        LogMessage("ReadFocusOffsetsFromProfile",
+                            $"Invalid offset for Filter {i + 1}: '{offsetStr}'. Defaulting to 0.");
+                    }
+                }
+            }
+
+            return _focusOffsets;
+        }
+
+        /// <summary>
+        /// Writes the filter offsets to the ASCOM profile
+        /// </summary>
+        internal static void WriteFocusOffsetsToProfile(int[] focusOffsets)
+        {
+            _focusOffsets = focusOffsets;
+
+            using (var driverProfile = new Profile())
+            {
+                driverProfile.DeviceType = "FilterWheel";
+
+                for (int i = 0; i < _slotCount; i++)
+                {
+                    string key = $"Filter{i + 1}Offset";
+                    driverProfile.WriteValue(DriverProgId, key, _focusOffsets[i].ToString());
+                    LogMessage("WriteFocusOffsetsToProfile", $"Filter {i + 1} offset written to profile: {_focusOffsets[i]}");
+                }
+            }
+        }
+
+
+        /// <summary>
         /// Log helper function that takes identifier and message strings
         /// </summary>
         /// <param name="identifier"></param>
@@ -551,6 +609,87 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
             var msg = string.Format(message, args);
             LogMessage(identifier, msg);
         }
+        #endregion
+
+        #region Helper methods
+
+        public static async Task ConnectAsync(Guid uniqueId)
+        {
+            if (!IsConnected)
+                await Task.Run(() => SetConnected(uniqueId, true));
+        }
+
+        public static void Disconnect(Guid uniqueId)
+        {
+            if (!IsConnected)
+                return;
+
+            SetConnected(uniqueId, false);
+        }
+
+        private static void EnsureConnected()
+        {
+            if (!IsConnected)
+                throw new InvalidOperationException("Filter wheel is not connected.");
+        }
+
+        public static void SetSlotCount(short newCount)
+        {
+            // Resize names
+            var newNames = new string[newCount];
+            for (int i = 0; i < Math.Min(newCount, _filterNames.Length); i++)
+                newNames[i] = _filterNames[i];
+            _filterNames = newNames;
+
+            // Resize offsets
+            var newOffsets = new int[newCount];
+            for (int i = 0; i < Math.Min(newCount, _filterOffsets.Length); i++)
+                newOffsets[i] = _filterOffsets[i];
+            _filterOffsets = newOffsets;
+
+
+            _slotCount = newCount;
+        }
+
+        public static async Task<string[]> GetFilterNamesAsync()
+        {
+            EnsureConnected();
+
+            int count = _slotCount; // already known from firmware
+            return await _service.GetNamesAsync(count);
+        }
+
+        public static async Task<int[]> GetOffsetsAsync()
+        {
+            EnsureConnected();
+
+            int count = _slotCount;
+            return await _service.GetOffsetsAsync(count);
+        }
+
+        public static async Task SetFilterNamesAsync(string[] names)
+        {
+            EnsureConnected();
+
+            for (int i = 0; i < names.Length; i++)
+            {
+                int firmwareIndex = i + 1; // convert 0‑based → 1‑based
+                await _service.SetNameAsync(firmwareIndex, names[i]);
+            }
+        }
+
+        public static async Task SetOffsetsAsync(int[] offsets)
+        {
+            EnsureConnected();
+
+            for (int i = 0; i < offsets.Length; i++)
+            {
+                int firmwareIndex = i + 1;
+                await _service.SetOffsetAsync(firmwareIndex, offsets[i]);
+            }
+        }
+
+
         #endregion
     }
 }

@@ -3,15 +3,19 @@ using CommunityToolkit.Mvvm.Input;
 using System;
 using System.Collections.ObjectModel;
 using System.IO.Ports;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver.ViewModel
 {
-    internal partial class SetupViewModel : ObservableObject
+    public partial class SetupViewModel : ObservableObject
     {
+        private Guid _uniqueId;  // The UniqueID of the driver instance, passed in from the Setup dialog constructor
+
         public event Action<bool>? CloseRequested;
 
         [ObservableProperty]
-        private ObservableCollection<string> comPorts = new();
+        private ObservableCollection<string> _comPorts = new();
 
         [ObservableProperty]
         private string? selectedComPort;
@@ -19,8 +23,20 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver.ViewModel
         [ObservableProperty]
         private bool traceEnabled;
 
-        public SetupViewModel()
+        [ObservableProperty]
+        private ObservableCollection<FilterEntryViewModel> filters = new();
+
+        [ObservableProperty]
+        private int selectedTabIndex;
+
+        [ObservableProperty]
+        private bool isBusy;
+
+        public SetupViewModel(Guid uniqueId)
         {
+            // System.Diagnostics.Debugger.Launch();
+            _uniqueId = uniqueId;
+
             if (FilterWheelHardware.IsInDesignMode)
                 return; // Skip all ASCOM logic in the designer
 
@@ -47,6 +63,7 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver.ViewModel
             // Fallback if no saved COM port
             if (string.IsNullOrWhiteSpace(SelectedComPort) && ComPorts.Count > 0)
                 SelectedComPort = ComPorts[0];
+
         }
 
         [RelayCommand]
@@ -62,6 +79,33 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver.ViewModel
             CloseRequested?.Invoke(false);
         }
 
+
+        private IAsyncRelayCommand? _saveFilterSettingsCommand;
+        public IAsyncRelayCommand SaveFilterSettingsCommand =>
+            _saveFilterSettingsCommand ??= new AsyncRelayCommand(SaveFilterSettingsAsync);
+
+        private async Task SaveFilterSettingsAsync()
+        {
+            var names = Filters.Select(f => f.Name).ToArray();
+            var positionOffsets = Filters.Select(f => f.PositionOffset).ToArray();
+            var focusOffsets = Filters.Select(f => f.FocusOffset).ToArray();
+
+            await FilterWheelHardware.SetFilterNamesAsync(names);
+            await FilterWheelHardware.SetOffsetsAsync(positionOffsets);
+
+            FilterWheelHardware.WriteFocusOffsetsToProfile(focusOffsets);
+        }
+
+
+        private IAsyncRelayCommand? _cancelFilterSettingsCommand;
+        public IAsyncRelayCommand CancelFilterSettingsCommand =>
+            _cancelFilterSettingsCommand ??= new AsyncRelayCommand(CancelFilterSettingsAsync);
+
+        private async Task CancelFilterSettingsAsync()
+        {
+            await LoadFilterWheelDataAsync();
+        }
+
         private void SaveSettings()
         {
             // Copy ViewModel values back into static fields
@@ -71,5 +115,44 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver.ViewModel
             // Persist to ASCOM Profile
             FilterWheelHardware.WriteProfile();
         }
+
+        private async Task LoadFilterWheelDataAsync()
+        {
+            try
+            {
+                isBusy = true;
+                await FilterWheelHardware.ConnectAsync(_uniqueId);
+
+                var names = await FilterWheelHardware.GetFilterNamesAsync();
+                var positionOffsets = await FilterWheelHardware.GetOffsetsAsync();
+                var focusOffsets = FilterWheelHardware.ReadFocusOffsetsFromProfile();
+                Filters.Clear();
+
+                for (int i = 0; i < names.Length; i++)
+                {
+                    Filters.Add(new FilterEntryViewModel(
+                        index: i + 1,
+                        name: names[i],
+                        positionOffset: positionOffsets[i],
+                        focusOffset: focusOffsets[i]
+                    ));
+                }
+            }
+            finally
+            {
+                isBusy = false;
+            }
+        }
+
+
+        #region Partial methods ....
+        async partial void OnSelectedTabIndexChanged(int value)
+        {
+            if (value == 1)   // Tab 2 (0 = COM port tab)
+                await LoadFilterWheelDataAsync();
+        }
+
+
+        #endregion
     }
 }

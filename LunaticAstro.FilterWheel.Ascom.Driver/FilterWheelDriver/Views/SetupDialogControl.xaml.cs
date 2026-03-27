@@ -1,4 +1,5 @@
-﻿using System;
+﻿using ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver.ViewModel;
+using System;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -9,9 +10,10 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver.Views
     {
         public event Action<bool>? CloseRequested;
 
-        public SetupDialogControl()
+        public SetupDialogControl(SetupViewModel viewModel)
         {
             InitializeComponent();
+            DataContext = viewModel;
             Loaded += SetupDialogControl_Loaded;
         }
 
