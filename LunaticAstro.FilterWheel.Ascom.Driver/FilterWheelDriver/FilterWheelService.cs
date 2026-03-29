@@ -25,7 +25,10 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
         public void Connect()
         {
             if (!IsConnected)
+            {
                 _client.Open();
+                _client.StartBackgroundReader();
+            }
         }
 
         public void Disconnect()
@@ -39,6 +42,15 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
             Disconnect();
             _client.Dispose();
         }
+
+        public async Task WaitForReadyAsync()
+        {
+            // Wait for P<n> from firmware
+            string ready = await _client.WaitForReadyAsync();
+
+            FilterWheelHardware.LogMessage("WaitForReadyAsync", $"Firmware ready: {ready}");
+        }
+
 
         // ------------------------------------------------------------
         // 1. MOVEMENT COMMANDS
@@ -294,7 +306,8 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
             var response = await _client.WaitForResponseAsync(
             line =>
                 line.StartsWith("FilterSlots", StringComparison.OrdinalIgnoreCase),
-            cts.Token); 
+            cts.Token);
+            FilterWheelHardware.LogMessage("GetFilterSlotCountAsync", $"Response: {response}");
             var parts = response.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length < 2 || !int.TryParse(parts[1], out var count))
                 throw new InvalidOperationException($"Unexpected I7 response: '{response}'");

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO.Ports;
 using System.Threading;
@@ -28,65 +29,41 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
             };
         }
 
+        
         public void Open()
         {
             if (!_port.IsOpen)
             {
                 _port.Open();
 
-                // Arduino resets when port opens
-                Thread.Sleep(1500);
+                // Reset TCS for this connection
+                _bootTcs = new TaskCompletionSource<bool>();
+                _readyTcs = new TaskCompletionSource<string>();
 
-                // Clear bootloader noise
+                // Reset and restart background reader
+                _readerCts?.Cancel();
+                _readerCts = null;
+                StartBackgroundReader();
+
                 _port.DiscardInBuffer();
                 _port.DiscardOutBuffer();
 
-                // Now wait for the wheel to finish its startup routine
-                var sw = Stopwatch.StartNew();
-                string line;
-                int attempts = 0;
-                do
-                {
-                    attempts++;
-                    try
-                    {
-                        line = _port.ReadLine().Trim();
+                Thread.Sleep(1500);
 
-                        // Ignore blank lines or bootloader garbage
-                        if (string.IsNullOrWhiteSpace(line) || line.StartsWith("⸮"))
-                            continue;
-
-                        // READY signal from firmware
-                        if (line.Equals("P1", StringComparison.OrdinalIgnoreCase))
-                        {
-                            Log?.Invoke("Startup complete: wheel is ready.");
-                            break;
-                        }
-
-                        // Log anything else for debugging
-                        Log?.Invoke($"Startup message: {line}");
-                    }
-                    catch
-                    {
-                        // Ignore timeouts during startup
-                        Log?.Invoke($"Waiting for startup message {attempts}...");
-                    }
-
-                    // Small delay to avoid hammering the port
-                    Thread.Sleep(20);
-
-                }
-                while (sw.ElapsedMilliseconds < 15000); // allow up to 15 seconds
-
-                if (sw.ElapsedMilliseconds >= 15000)
-                    throw new Exception("Filter wheel did not become ready (no P1 received).");
+                // Wait for OK
+                if (!Task.WhenAny(_bootTcs.Task, Task.Delay(5000)).Result.Equals(_bootTcs.Task))
+                    throw new Exception("No OK received from firmware.");
             }
         }
 
         public void Close()
         {
             if (_port.IsOpen)
+            {
+                _readerCts?.Cancel();
+                _readerCts = null;
                 _port.Close();
+            }
         }
 
         // Core synchronous implementation
@@ -103,32 +80,25 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
         public Task SendCommandAsync(string command)
             => Task.Run(() => SendCommand(command));
 
-        public async Task<string> ReadLineAsync(CancellationToken token)
+        public async Task<string> ReadResponseAsync(CancellationToken token)
         {
-            if (!_port.IsOpen)
-                throw new InvalidOperationException("Serial port is not open.");
-
-            return await Task.Run(() =>
+            while (true)
             {
-                while (true)
-                {
-                    token.ThrowIfCancellationRequested();
+                token.ThrowIfCancellationRequested();
 
-                    try
-                    {
-                        var line = _port.ReadLine().Trim();
-                        if (!string.IsNullOrWhiteSpace(line))
-                        {
-                            Log?.Invoke($"RX: {line}");
-                            return line;
-                        }
-                    }
-                    catch (TimeoutException)
-                    {
-                        // keep waiting
-                    }
-                }
-            }, token);
+                if (_responseQueue.TryDequeue(out var line))
+                    return line;
+
+                await Task.Run(() => _responseEvent.WaitOne(100), token);
+            }
+        }
+
+        public Task<string> WaitForReadyAsync()
+        {
+            if (_readyTcs == null)
+                throw new InvalidOperationException("Client not opened.");
+
+            return _readyTcs.Task;
         }
 
         public async Task<string> WaitForResponseAsync(
@@ -139,13 +109,72 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var line = await ReadLineAsync(cancellationToken);
+                var line = await ReadResponseAsync(cancellationToken);
 
                 if (predicate(line))
                     return line;
             }
         }
 
+        private CancellationTokenSource? _readerCts;
+
+        public void StartBackgroundReader()
+        {
+            if (_readerCts != null)
+                return;
+
+            _readerCts = new CancellationTokenSource();
+            var token = _readerCts.Token;
+
+            Task.Run(async () =>
+            {
+                while (!token.IsCancellationRequested && _port.IsOpen)
+                {
+                    try
+                    {
+                        string line = _port.ReadLine().Trim();
+                        if (!string.IsNullOrWhiteSpace(line))
+                        {
+                            Log?.Invoke($"RX: {line} (background)");
+                            ProcessIncomingLine(line);
+                        }
+                    }
+                    catch (TimeoutException)
+                    {
+                        // normal
+                    }
+                    catch (Exception ex)
+                    {
+                        Log?.Invoke($"Background reader error: {ex.Message}");
+                    }
+                }
+            }, token);
+        }
+
+        private TaskCompletionSource<bool>? _bootTcs;
+        private TaskCompletionSource<string>? _readyTcs;
+        private readonly ConcurrentQueue<string> _responseQueue = new();
+        private readonly AutoResetEvent _responseEvent = new(false);
+
+        private void ProcessIncomingLine(string line)
+        {
+            if (line.StartsWith("CONNECTED", StringComparison.OrdinalIgnoreCase))
+            {
+                _bootTcs?.TrySetResult(true);
+                return;
+            }
+
+            if (line.StartsWith("READY", StringComparison.OrdinalIgnoreCase))
+            {
+                _readyTcs?.TrySetResult(line);
+                return;
+            }
+
+            // Otherwise this is a command response
+            _responseQueue.Enqueue(line);
+            _responseEvent.Set();
+
+        }
 
         public void Dispose()
         {

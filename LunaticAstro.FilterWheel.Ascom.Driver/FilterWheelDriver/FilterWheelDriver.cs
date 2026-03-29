@@ -477,6 +477,7 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
 
                 try
                 {
+                    _connectingState = true;
                     if (value)
                     {
                         LogMessage("Connected Set", "Connecting...");
@@ -487,6 +488,7 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
                     else
                     {
                         LogMessage("Connected Set", "Disconnecting...");
+
                         FilterWheelHardware.SetConnected(uniqueId, false);
                         _connectedState = false;
                         LogMessage("Connected Set", "Disconnected OK");
@@ -496,6 +498,10 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
                 {
                     LogMessage("Connected Set", $"Exception: {ex.Message}");
                     throw;
+                }
+                finally
+                {
+                    _connectingState = false;
                 }
             }
         }
@@ -717,7 +723,7 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
                     List<StateValue> returnValue = new List<StateValue>();
 
                     // Add one entry for each operational state, if possible
-                    try { returnValue.Add(new StateValue(nameof(IFilterWheelV3.Position), Position)); } catch { }
+                    try { returnValue.Add(new StateValue(nameof(IFilterWheelV3.Position), FilterWheelHardware.Position)); } catch { }
                     ;
                     try { returnValue.Add(new StateValue(DateTime.Now)); } catch { }
                     ;

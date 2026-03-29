@@ -17,6 +17,7 @@ using ASCOM.Utilities;
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO.Ports;
 using System.Threading;
 using System.Threading.Tasks;
@@ -318,14 +319,11 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
                 try
                 {
                     LogMessage("SetConnected", "Connecting to hardware.");
+                    _initialised = false;
+                    _currentPosition = -1;  // Signal filter wheel is in motion during connection.
                     _service.Connect();
-
-                    // Safe synchronous call
-                    _slotCount = (short)_service.GetFilterSlotCountAsync().GetAwaiter().GetResult();
-                    _currentPosition = (short)_service.GetCurrentPositionAsync().GetAwaiter().GetResult();
-                    _filterOffsets = _service.GetOffsetsAsync(_slotCount).GetAwaiter().GetResult();
-                    _filterNames = _service.GetNamesAsync(_slotCount).GetAwaiter().GetResult();
-                    LogMessage("SetConnected", $"Hardware connected. Current position: {_currentPosition}");
+                    LogMessage("SetConnected", $"Hardware connected.");
+                    Task.Run(() => InitialiseHardwareAsync()); // Initialise hardware asynchronously but wait for it to complete before proceeding
                 }
                 catch (Exception ex)
                 {
@@ -342,6 +340,53 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
                     LogMessage("SetConnected", $" ID {id} is connected");
             }
         }
+
+
+        private static bool _initialised = false; // Flag to indicate whether the hardware has been initialised
+
+        private static async Task InitialiseHardwareAsync()
+        {
+            try
+            {
+                LogMessage("InitialiseHardwareAsync", $"Hardware initialising .");
+                // 1. Wait for firmware to finish homing
+                await _service.WaitForReadyAsync();
+                
+                // 2. Now safe to query hardware
+                _slotCount = (short)await _service.GetFilterSlotCountAsync();
+                _filterOffsets = await _service.GetOffsetsAsync(_slotCount);
+                _filterNames = await _service.GetNamesAsync(_slotCount);
+                _currentPosition = (short)await _service.GetCurrentPositionAsync();
+                _initialised = true;
+                LogMessage("InitialiseHardwareAsync", $"Initialised. Current position: {_currentPosition}");
+
+            }
+            catch (Exception ex)
+            {
+                LogMessage("InitialiseHardwareAsync", $"Initialisation failed: {ex.Message}");
+                _initialised = false;
+            }
+        }
+
+        private static void EnsureInitialised()
+        {
+            LogMessage("EnsureInitialised", $"Checking initialisation. Initialised: {_initialised}");
+            if (_initialised)
+                return;
+
+            if (_service == null)
+                throw new ASCOM.DriverException("Filter wheel is not connected.");
+
+            var sw = Stopwatch.StartNew();
+
+            while (!_initialised && sw.ElapsedMilliseconds < 5000)
+                Thread.Sleep(50);
+
+            if (!_initialised)
+                throw new ASCOM.DriverException("Filter wheel failed to initialise within 5 seconds.");
+        }
+
+
 
         /// <summary>
         /// Returns a description of the device, such as manufacturer and model number. Any ASCII characters may be used.
@@ -418,7 +463,7 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
         private static int[] _filterOffsets = new int[0];       //class level variable to hold filter positional offsets
         private static int[] _focusOffsets = new int[0];        // class level variable to hold filter focus offsets
         private static string[] _filterNames = new string[0];   // class level variable to hold filter names
-        private static short _currentPosition = 0;              // class level variable to retain the current filter wheel position
+        private static short _currentPosition = -1;              // class level variable to retain the current filter wheel position
         private static short _slotCount = 0;                    // class level variable to hold the number of filter slots in the wheel
         
         /// <summary>
@@ -428,6 +473,7 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
         {
             get
             {
+                EnsureInitialised();
                 foreach (int fwOffset in _filterOffsets) // Write filter offsets to the log
                 {
                     LogMessage("FocusOffsets Get", fwOffset.ToString());
@@ -444,6 +490,7 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
         {
             get
             {
+                EnsureInitialised();
                 foreach (string fwName in _filterNames) // Write filter names to the log
                 {
                     LogMessage("Names Get", fwName);
@@ -461,21 +508,46 @@ namespace ASCOM.LunaticAstro.FilterWheel.FilterWheelDriver
             get
             {
                 LogMessage("Position Get", _currentPosition.ToString());
+
+                // Do NOT call EnsureInitialised() here.
+                // Conform will call Position immediately after Connect().
+                // If initialisation is still running, return last known value.
                 return _currentPosition;
             }
+
             set
             {
                 LogMessage("Position Set", value.ToString());
-                if ((value < 0) | (value > _slotCount-1))
+
+                // Movement MUST NOT start until initialised
+                EnsureInitialised();
+
+                if (value < 0 || value > _slotCount - 1)
                 {
-                    LogMessage("", "Throwing InvalidValueException - Position: " + value.ToString() + ", Range: 0 to " + (_slotCount - 1).ToString());
-                    throw new InvalidValueException("Position", value.ToString(), "0 to " + (_slotCount - 1).ToString());
+                    LogMessage("", $"Throwing InvalidValueException - Position: {value}, Range: 0 to {_slotCount - 1}");
+                    throw new InvalidValueException("Position", value.ToString(), $"0 to {_slotCount - 1}");
                 }
-                var result = _service.GoToPositionAsync((short)(value + 1)).GetAwaiter().GetResult();
-                _currentPosition = (short)(result -1);
+
+                // Indicate movement
+                _currentPosition = -1;
+
+                // Fire-and-forget movement task
+                Task.Run(async () =>
+                {
+                    try
+                    {
+                        var result = await _service.GoToPositionAsync(value + 1);
+                        _currentPosition = (short)(result - 1);
+                    }
+                    catch (Exception ex)
+                    {
+                        LogMessage("Position Set", $"Move failed: {ex.Message}");
+                        // Leave _currentPosition = -1 or set to last known safe value
+                    }
+                });
+
             }
         }
-
         #endregion
 
         #region Private properties and methods
